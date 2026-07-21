@@ -23,13 +23,23 @@ def get_fng():
     res = requests.get("https://api.alternative.me/fng/?limit=1").json()['data'][0]
     return res['value'], res['value_classification']
 
-# 3. MVRV Ratio (Blockchain.com Free On-Chain)
+# 3. MVRV Ratio (CoinMetrics Community API - No Key Required)
 @st.cache_data(ttl=3600)
 def get_mvrv():
-    res = requests.get("https://api.blockchain.info/charts/mvrv?timespan=1years&format=json").json()
-    df = pd.DataFrame(res['values'])
-    df['date'] = pd.to_datetime(df['x'], unit='s')
-    df['mvrv'] = df['y']
+    url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+    params = {
+        "assets": "btc",
+        "metrics": "CapMVRVCur",
+        "frequency": "1d",
+        "limit_per_asset": 365
+    }
+    # Added browser header to bypass standard bot protections
+    headers = {"User-Agent": "Mozilla/5.0"}
+    res = requests.get(url, params=params, headers=headers).json()
+    
+    df = pd.DataFrame(res['data'])
+    df['date'] = pd.to_datetime(df['time'])
+    df['mvrv'] = df['CapMVRVCur'].astype(float)
     return df
 
 # Execute Fetchers
