@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
+import requests  # <-- Added to handle custom sessions
 
 st.title("Bank Central Asia (BBCA.JK) Equity Matrix")
 st.caption("Quantitative regime matrix tailored specifically for BBCA.JK.")
@@ -10,8 +11,14 @@ TICKER = "BBCA.JK"
 
 @st.cache_data(ttl=3600)
 def get_bbca_data():
-    # Fetch 3 years of daily historical data
-    df = yf.download(TICKER, period="3y", progress=False)
+    # 1. Create a custom session to bypass Yahoo Finance cloud blocks
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    })
+    
+    # 2. Pass the session into yfinance
+    df = yf.download(TICKER, period="3y", progress=False, session=session)
     
     if df.empty:
         return pd.DataFrame()
