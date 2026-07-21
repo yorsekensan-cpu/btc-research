@@ -12,35 +12,43 @@ st.caption("On-chain valuation + technical regime dashboard. Not financial advic
 # DATA
 # ---------------------------------------------------------------------------
 
+def _fetch_blockchain_chart(chart_name):
+    """
+    Blockchain.com's public charts API. Free, no key, no auth header needed,
+    stable for well over a decade. Returns {"values": [{"x": epoch_sec, "y": value}, ...]}.
+    sampled=false forces full daily resolution instead of the ~1.5k-point
+    downsampled default, which would otherwise wreck rolling-window indicators.
+    """
+    url = f"https://api.blockchain.info/charts/{chart_name}"
+    params = {"timespan": "all", "format": "json", "sampled": "false"}
+    res = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).json()
+    out = pd.DataFrame(res["values"])
+    out["date"] = pd.to_datetime(out["x"], unit="s").dt.normalize()
+    return out[["date", "y"]]
+
+
 @st.cache_data(ttl=3600)
 def get_data():
     """
-    All fields pulled here are on CoinMetrics' free Community API tier
-    (no key required): PriceUSD, CapMVRVCur, CapMrktCurUSD, CapRealUSD, IssContUSD.
-    Pulling full history since 2013 because Z-scores / percentiles are meaningless
-    on a 365-day window.
+    NOTE: CoinMetrics retired CapMrktCurUSD / CapRealUSD / IssContUSD from their
+    free Community tier (confirmed — those calls now 400 on the free endpoint),
+    which is what broke MVRV Z-Score / NUPL / Puell in the previous version.
+    There is currently no verified free, no-key source for realized-cap data,
+    so MVRV Z-Score and NUPL are dropped rather than shipped broken.
+    Puell Multiple is rebuilt using Blockchain.com's free miners-revenue chart
+    (real miner USD revenue — same concept as before, different free source).
     """
-    url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
-    params = {
-        "assets": "btc",
-        "metrics": "PriceUSD,CapMVRVCur,CapMrktCurUSD,CapRealUSD,IssContUSD",
-        "frequency": "1d",
-        "start_time": "2013-01-01",
-        "page_size": 10000,
-    }
-    res = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}).json()
-    df = pd.DataFrame(res["data"])
-    df["date"] = pd.to_datetime(df["time"])
+    price = _fetch_blockchain_chart("market-price").rename(columns={"y": "close"})
+    revenue = _fetch_blockchain_chart("miners-revenue").rename(columns={"y": "miner_rev_usd"})
 
-    for col in ["PriceUSD", "CapMVRVCur", "CapMrktCurUSD", "CapRealUSD", "IssContUSD"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df = df.rename(columns={"PriceUSD": "close"}).sort_values("date").reset_index(drop=True)
+    df = pd.merge(price, revenue, on="date", how="left").sort_values("date").reset_index(drop=True)
+    df = df[df["close"] > 0].reset_index(drop=True)  # blockchain.info sometimes has stray zero rows pre-2011
 
     # --- Technicals (computed locally, no extra API calls) ---
     df["MA200"] = df["close"].rolling(200).mean()
     df["MA111"] = df["close"].rolling(111).mean()
     df["MA350x2"] = df["close"].rolling(350).mean() * 2  # Pi Cycle Top upper leg
+    df["pct_vs_200ma"] = (df["close"] / df["MA200"] - 1) * 100
 
     delta = df["close"].diff()
     gain = delta.clip(lower=0).rolling(14).mean()
@@ -54,17 +62,8 @@ def get_data():
     lower_bb = ma20 - 2 * std20
     df["BB_pctB"] = (df["close"] - lower_bb) / (upper_bb - lower_bb)
 
-    # --- On-chain valuation metrics ---
-    df["mvrv"] = df["CapMVRVCur"]
-
-    diff = df["CapMrktCurUSD"] - df["CapRealUSD"]
-    exp_mean = diff.expanding(min_periods=365).mean()
-    exp_std = diff.expanding(min_periods=365).std()
-    df["mvrv_z"] = (diff - exp_mean) / exp_std
-
-    df["nupl"] = (df["CapMrktCurUSD"] - df["CapRealUSD"]) / df["CapMrktCurUSD"]
-
-    df["puell"] = df["IssContUSD"] / df["IssContUSD"].rolling(365).mean()
+    # --- Puell Multiple (miner USD revenue vs its own 365-day average) ---
+    df["puell"] = df["miner_rev_usd"] / df["miner_rev_usd"].rolling(365).mean()
 
     return df
 
@@ -103,8 +102,7 @@ def zone(value, low, high, invert=False):
 
 
 signals = {
-    "MVRV Z-Score": zone(latest["mvrv_z"], 0, 7),
-    "NUPL": zone(latest["nupl"], 0, 0.75),
+    "% vs 200DMA": zone(latest["pct_vs_200ma"], -15, 100),
     "Puell Multiple": zone(latest["puell"], 0.5, 4),
     "RSI (14)": zone(latest["RSI14"], 30, 70),
     "Bollinger %B": zone(latest["BB_pctB"], 0, 1),
@@ -113,18 +111,12 @@ signals = {
 }
 
 descriptions = {
-    "MVRV Z-Score": (
-        "(Market Cap − Realized Cap) scaled by historical volatility. Realized cap "
-        "values every coin at the price it last moved, so this compares 'what the "
-        "market says it's worth' to 'what holders actually paid.' Z above ~7 has "
-        "coincided with every major cycle top since 2013; Z below 0 has coincided "
-        "with every major cycle bottom. Best for macro positioning, not entries/exits."
-    ),
-    "NUPL": (
-        "Net Unrealized Profit/Loss — the % of market cap currently sitting in profit "
-        "across all coins. Above 0.75 = euphoria, most holders sitting on large gains "
-        "and prone to sell into strength. Below 0 = capitulation, majority underwater, "
-        "historically a bottoming signal. 0–0.25 is the 'hope/fear' accumulation range."
+    "% vs 200DMA": (
+        "Price's distance from its own 200-day moving average, as a %. A simple, "
+        "always-available proxy for 'how stretched is this move.' Historically, "
+        "readings above +100% (price at 2x its 200DMA) have shown up near cycle "
+        "tops; readings below -15% to -20% (price meaningfully under its 200DMA) "
+        "have shown up near cycle lows. Cruder than MVRV but never breaks."
     ),
     "Puell Multiple": (
         "Daily miner revenue (USD) divided by its 365-day average. Miners are "
@@ -163,6 +155,8 @@ descriptions = {
 buy_count = sum(1 for label, _ in signals.values() if label == "BUY ZONE")
 sell_count = sum(1 for label, _ in signals.values() if label == "SELL ZONE")
 
+total_signals = len(signals)
+
 if sell_count >= 4:
     verdict, verdict_color = "MAJORITY OF SIGNALS IN SELL ZONE", "red"
 elif buy_count >= 4:
@@ -172,14 +166,13 @@ else:
 
 st.markdown(
     f"<h4 style='color:{verdict_color}'>Composite read: {verdict} "
-    f"({buy_count} buy-zone / {sell_count} sell-zone / {7 - buy_count - sell_count} neutral)</h4>",
+    f"({buy_count} buy-zone / {sell_count} sell-zone / {total_signals - buy_count - sell_count} neutral)</h4>",
     unsafe_allow_html=True,
 )
 
-cols = st.columns(7)
+cols = st.columns(total_signals)
 metric_values = {
-    "MVRV Z-Score": f"{latest['mvrv_z']:.2f}",
-    "NUPL": f"{latest['nupl']:.2f}",
+    "% vs 200DMA": f"{latest['pct_vs_200ma']:+.1f}%",
     "Puell Multiple": f"{latest['puell']:.2f}",
     "RSI (14)": f"{latest['RSI14']:.1f}",
     "Bollinger %B": f"{latest['BB_pctB']:.2f}",
@@ -212,36 +205,23 @@ with st.expander("What is Pi Cycle Top / how to read this chart"):
 st.divider()
 
 # ---------------------------------------------------------------------------
-# ON-CHAIN VALUATION ROW
+# VALUATION ROW
 # ---------------------------------------------------------------------------
 
 c1, c2 = st.columns(2)
 
 with c1:
-    st.subheader("MVRV Z-Score")
+    st.subheader("% vs 200-Day MA")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["date"], y=df["mvrv_z"], name="MVRV Z-Score", line=dict(color="#00E676")))
-    fig.add_hline(y=7, line_dash="dash", line_color="red", annotation_text="Sell zone (7)")
-    fig.add_hline(y=0, line_dash="dash", line_color="green", annotation_text="Buy zone (0)")
+    fig.add_trace(go.Scatter(x=df["date"], y=df["pct_vs_200ma"], name="% vs 200DMA", line=dict(color="#00E676")))
+    fig.add_hline(y=100, line_dash="dash", line_color="red", annotation_text="Stretched high (+100%)")
+    fig.add_hline(y=-15, line_dash="dash", line_color="green", annotation_text="Stretched low (-15%)")
     fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
-    with st.expander("How to read MVRV Z-Score"):
-        st.write(descriptions["MVRV Z-Score"])
+    with st.expander("How to read % vs 200DMA"):
+        st.write(descriptions["% vs 200DMA"])
 
 with c2:
-    st.subheader("NUPL")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["date"], y=df["nupl"], name="NUPL", line=dict(color="#00B8D4")))
-    fig.add_hline(y=0.75, line_dash="dash", line_color="red", annotation_text="Euphoria (0.75)")
-    fig.add_hline(y=0, line_dash="dash", line_color="green", annotation_text="Capitulation (0)")
-    fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
-    with st.expander("How to read NUPL"):
-        st.write(descriptions["NUPL"])
-
-c3, c4 = st.columns(2)
-
-with c3:
     st.subheader("Puell Multiple")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["date"], y=df["puell"], name="Puell Multiple", line=dict(color="#FFD600")))
@@ -251,20 +231,6 @@ with c3:
     st.plotly_chart(fig, use_container_width=True)
     with st.expander("How to read Puell Multiple"):
         st.write(descriptions["Puell Multiple"])
-
-with c4:
-    st.subheader("MVRV (raw ratio)")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["date"], y=df["mvrv"], name="MVRV", line=dict(color="#00E676")))
-    fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Fair value (1.0)")
-    fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
-    with st.expander("How to read raw MVRV"):
-        st.write(
-            "Market Cap / Realized Cap. Above 1 = average holder in profit, below 1 = "
-            "average holder underwater. Simpler but noisier version of the Z-score above; "
-            "kept here mainly for direct comparison against the Z-score."
-        )
 
 st.divider()
 
