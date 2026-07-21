@@ -1,0 +1,60 @@
+import streamlit as st
+import pandas as pd
+import requests
+import plotly.graph_objects as go
+import streamlit.components.v1 as components
+
+st.set_page_config(page_title="BTC Analytics", layout="wide")
+st.title("Bitcoin Unified Analytics")
+
+# 1. Binance Price & MA200 (No API Key Required)
+@st.cache_data(ttl=3600)
+def get_price_data():
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": "BTCUSDT", "interval": "1d", "limit": 300}
+    res = requests.get(url, params=params).json()
+    
+    # Map the Binance REST response
+    df = pd.DataFrame(res, columns=[
+        'date', 'open', 'high', 'low', 'close', 'vol', 
+        'close_time', 'qav', 'trades', 'tbb', 'tbq', 'ignore'
+    ])
+    df['date'] = pd.to_datetime(df['date'], unit='ms')
+    df['close'] = df['close'].astype(float)
+    
+    # Calculate the 200 Simple Moving Average
+    df['MA200'] = df['close'].rolling(window=200).mean()
+    return df.dropna()
+
+# 2. Fear & Greed Index (No API Key Required)
+@st.cache_data(ttl=3600)
+def get_fng():
+    res = requests.get("https://api.alternative.me/fng/?limit=1").json()
+    data = res['data'][0]
+    return data['value'], data['value_classification']
+
+# Execute Fetchers
+df_price = get_price_data()
+fng_val, fng_class = get_fng()
+
+# Build the UI Layout
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    st.subheader("BTC Price & 200 SMA")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_price['date'], y=df_price['close'], name='BTC Price', line=dict(color='#2962FF')))
+    fig.add_trace(go.Scatter(x=df_price['date'], y=df_price['MA200'], name='200 SMA', line=dict(color='#FF6D00')))
+    fig.update_layout(height=500, margin=dict(l=0, r=0, t=30, b=0), template="plotly_dark")
+    st.plotly_chart(fig, use_container_width=True)
+
+with col2:
+    st.subheader("Sentiment")
+    st.metric(label="Fear & Greed Index", value=fng_val, delta=fng_class, delta_color="off")
+    
+    st.subheader("On-Chain Metrics")
+    st.info("To populate MVRV, SOPR, and NUPL, route your free Dune Analytics or BGeometrics API GET request here. The data mapping pattern is identical to the Binance fetcher.")
+
+st.subheader("Liquidation Heatmap")
+# 3. Coinglass Embedded Liquidity
+components.iframe("https://www.coinglass.com/pro/i/LiquidationHeatMap", height=800, scrolling=True)
