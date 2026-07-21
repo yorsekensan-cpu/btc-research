@@ -8,16 +8,10 @@ st.title("Bitcoin Investment Dashboard")
 st.caption("On-chain valuation + technical regime dashboard. Not financial advice — use as one input among many.")
 
 # ---------------------------------------------------------------------------
-# DATA
+# DATA FETCHING
 # ---------------------------------------------------------------------------
 
 def _fetch_blockchain_chart(chart_name):
-    """
-    Blockchain.com's public charts API. Free, no key, no auth header needed,
-    stable for well over a decade. Returns {"values": [{"x": epoch_sec, "y": value}, ...]}.
-    sampled=false forces full daily resolution instead of the ~1.5k-point
-    downsampled default, which would otherwise wreck rolling-window indicators.
-    """
     url = f"https://api.blockchain.info/charts/{chart_name}"
     params = {"timespan": "all", "format": "json", "sampled": "false"}
     res = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).json()
@@ -32,9 +26,9 @@ def get_data():
     revenue = _fetch_blockchain_chart("miners-revenue").rename(columns={"y": "miner_rev_usd"})
 
     df = pd.merge(price, revenue, on="date", how="left").sort_values("date").reset_index(drop=True)
-    df = df[df["close"] > 0].reset_index(drop=True)  # blockchain.info sometimes has stray zero rows pre-2011
+    df = df[df["close"] > 0].reset_index(drop=True)
 
-    # --- Technicals (computed locally, no extra API calls) ---
+    # --- Technicals ---
     df["MA200"] = df["close"].rolling(200).mean()
     df["MA111"] = df["close"].rolling(111).mean()
     df["MA350x2"] = df["close"].rolling(350).mean() * 2  # Pi Cycle Top upper leg
@@ -52,7 +46,7 @@ def get_data():
     lower_bb = ma20 - 2 * std20
     df["BB_pctB"] = (df["close"] - lower_bb) / (upper_bb - lower_bb)
 
-    # --- Puell Multiple (miner USD revenue vs its own 365-day average) ---
+    # --- Puell Multiple ---
     df["puell"] = df["miner_rev_usd"] / df["miner_rev_usd"].rolling(365).mean()
 
     return df
@@ -69,11 +63,10 @@ fng_val, fng_class = get_fng()
 latest = df.iloc[-1]
 
 # ---------------------------------------------------------------------------
-# SIGNAL LOGIC
+# SIGNAL LOGIC & DESCRIPTIONS
 # ---------------------------------------------------------------------------
 
 def zone(value, low, high, invert=False):
-    """Return (label, color) — green=buy zone, red=sell zone, gray=neutral."""
     if pd.isna(value):
         return "N/A", "gray"
     if not invert:
@@ -100,16 +93,44 @@ signals = {
 }
 
 descriptions = {
-    "% vs 200DMA": "Price's distance from its own 200-day moving average, as a %.",
-    "Puell Multiple": "Daily miner revenue (USD) divided by its 365-day average.",
-    "RSI (14)": "Standard 14-day momentum oscillator on price.",
-    "Bollinger %B": "Where price sits relative to its 20-day volatility bands.",
-    "Fear & Greed": "Aggregate sentiment index (volatility, momentum, social media, surveys, dominance).",
-    "Pi Cycle Top": "Fires when the 111-day MA crosses above 2x the 350-day MA.",
+    "% vs 200DMA": (
+        "Price's distance from its own 200-day moving average, as a %. A simple, "
+        "always-available proxy for 'how stretched is this move.' Historically, "
+        "readings above +100% (price at 2x its 200DMA) have shown up near cycle "
+        "tops; readings below -15% to -20% (price meaningfully under its 200DMA) "
+        "have shown up near cycle lows."
+    ),
+    "Puell Multiple": (
+        "Daily miner revenue (USD) divided by its 365-day average. Miners are "
+        "structurally forced sellers to cover costs. Below 0.5 = miners under-earning, "
+        "selling less/at a loss — historically a strong accumulation zone. Above 4 = "
+        "miners in abnormal profit, often coincides with blow-off tops."
+    ),
+    "RSI (14)": (
+        "Standard 14-day momentum oscillator on price. Above 70 = short-term "
+        "overbought/exhausted. Below 30 = short-term oversold. Good for timing "
+        "entries/exits inside a trend already confirmed by the metrics above."
+    ),
+    "Bollinger %B": (
+        "Where price sits relative to its 20-day volatility bands. Above 1 = price has "
+        "broken above the upper band (statistically stretched, mean-reversion risk). "
+        "Below 0 = broken below the lower band (statistically stretched down, bounce risk)."
+    ),
+    "Fear & Greed": (
+        "Aggregate sentiment index (volatility, momentum, social media, surveys, "
+        "dominance). Extreme Greed (75+) tends to precede pullbacks. Extreme Fear "
+        "(25 or below) has historically been a contrarian buy signal."
+    ),
+    "Pi Cycle Top": (
+        "Fires when the 111-day MA crosses above 2x the 350-day MA. A purely "
+        "price-based signal that has flagged every major cycle top since 2013 within "
+        "days, with no historical false positives on the top side. It only calls tops, "
+        "never bottoms."
+    ),
 }
 
 # ---------------------------------------------------------------------------
-# LAYOUT
+# LAYOUT & SUMMARY MATRIX
 # ---------------------------------------------------------------------------
 
 buy_count = sum(1 for label, _ in signals.values() if label == "BUY ZONE")
@@ -146,6 +167,10 @@ for c, (name, (label, color)) in zip(cols, signals.items()):
 
 st.divider()
 
+# ---------------------------------------------------------------------------
+# CHARTS & EXPANDABLE DESCRIPTIONS
+# ---------------------------------------------------------------------------
+
 timeframe = st.radio("Chart timeframe", options=["1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "All"], index=3, horizontal=True)
 _days_map = {"1M": 30, "3M": 90, "6M": 182, "1Y": 365, "2Y": 730, "3Y": 1095, "5Y": 1825, "All": None}
 _cutoff_days = _days_map[timeframe]
@@ -157,6 +182,7 @@ else:
 
 st.divider()
 
+# Price & Pi Cycle
 st.subheader("Price, 200MA & Pi Cycle Top")
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["close"], name="BTC Price", line=dict(color="#2962FF")))
@@ -165,9 +191,12 @@ fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["MA111"], name="111 DMA",
 fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["MA350x2"], name="350 DMA x2", line=dict(color="#D50000", dash="dot")))
 fig1.update_layout(height=420, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark", yaxis_type="log")
 st.plotly_chart(fig1, use_container_width=True)
+with st.expander("What is Pi Cycle Top / how to read this chart"):
+    st.write(descriptions["Pi Cycle Top"])
 
 st.divider()
 
+# Valuation Row
 c1, c2 = st.columns(2)
 with c1:
     st.subheader("% vs 200-Day MA")
@@ -177,6 +206,8 @@ with c1:
     fig.add_hline(y=-15, line_dash="dash", line_color="green", annotation_text="Stretched low (-15%)")
     fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
+    with st.expander("How to read % vs 200DMA"):
+        st.write(descriptions["% vs 200DMA"])
 
 with c2:
     st.subheader("Puell Multiple")
@@ -186,9 +217,12 @@ with c2:
     fig.add_hline(y=0.5, line_dash="dash", line_color="green", annotation_text="Miner capitulation (0.5)")
     fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
+    with st.expander("How to read Puell Multiple"):
+        st.write(descriptions["Puell Multiple"])
 
 st.divider()
 
+# Technical / Sentiment Row
 c5, c6 = st.columns(2)
 with c5:
     st.subheader("RSI (14)")
@@ -198,6 +232,8 @@ with c5:
     fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold (30)")
     fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
+    with st.expander("How to read RSI(14)"):
+        st.write(descriptions["RSI (14)"])
 
 with c6:
     st.subheader("Bollinger %B")
@@ -207,6 +243,14 @@ with c6:
     fig.add_hline(y=0, line_dash="dash", line_color="green", annotation_text="Lower band (0)")
     fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
+    with st.expander("How to read Bollinger %B"):
+        st.write(descriptions["Bollinger %B"])
+
+st.divider()
 
 st.subheader("Market Sentiment")
-st.metric(label="Fear & Greed Index", value=fng_val, delta=fng_class, delta_color="off")
+sc1, sc2 = st.columns([1, 3])
+with sc1:
+    st.metric(label="Fear & Greed Index", value=fng_val, delta=fng_class, delta_color="off")
+with sc2:
+    st.write(descriptions["Fear & Greed"])
