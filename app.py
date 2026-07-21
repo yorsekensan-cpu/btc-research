@@ -7,54 +7,56 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="BTC Analytics", layout="wide")
 st.title("Bitcoin Unified Analytics")
 
-# 1. Binance Price & MA200 (No API Key Required)
+# 1. Price & MA200 (Coinbase - No Blocks)
 @st.cache_data(ttl=3600)
-def get_price_data():
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": "BTCUSDT", "interval": "1d", "limit": 300}
-    res = requests.get(url, params=params).json()
-    
-    # Map the Binance REST response
-    df = pd.DataFrame(res, columns=[
-        'date', 'open', 'high', 'low', 'close', 'vol', 
-        'close_time', 'qav', 'trades', 'tbb', 'tbq', 'ignore'
-    ])
-    df['date'] = pd.to_datetime(df['date'], unit='ms')
-    df['close'] = df['close'].astype(float)
-    
-    # Calculate the 200 Simple Moving Average
-    df['MA200'] = df['close'].rolling(window=200).mean()
+def get_price():
+    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
+    res = requests.get(url, params={"granularity": 86400}).json()
+    df = pd.DataFrame(res, columns=['time', 'low', 'high', 'open', 'close', 'vol']).sort_values('time')
+    df['date'] = pd.to_datetime(df['time'], unit='s')
+    df['MA200'] = df['close'].rolling(200).mean()
     return df.dropna()
 
-# 2. Fear & Greed Index (No API Key Required)
+# 2. Fear & Greed (Alternative.me)
 @st.cache_data(ttl=3600)
 def get_fng():
-    res = requests.get("https://api.alternative.me/fng/?limit=1").json()
-    data = res['data'][0]
-    return data['value'], data['value_classification']
+    res = requests.get("https://api.alternative.me/fng/?limit=1").json()['data'][0]
+    return res['value'], res['value_classification']
+
+# 3. MVRV Ratio (Blockchain.com Free On-Chain)
+@st.cache_data(ttl=3600)
+def get_mvrv():
+    res = requests.get("https://api.blockchain.info/charts/mvrv?timespan=1years&format=json").json()
+    df = pd.DataFrame(res['values'])
+    df['date'] = pd.to_datetime(df['x'], unit='s')
+    df['mvrv'] = df['y']
+    return df
 
 # Execute Fetchers
-df_price = get_price_data()
+df_price = get_price()
 fng_val, fng_class = get_fng()
+df_mvrv = get_mvrv()
 
 # Build the UI Layout
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    st.subheader("BTC Price & 200 SMA")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_price['date'], y=df_price['close'], name='BTC Price', line=dict(color='#2962FF')))
-    fig.add_trace(go.Scatter(x=df_price['date'], y=df_price['MA200'], name='200 SMA', line=dict(color='#FF6D00')))
-    fig.update_layout(height=500, margin=dict(l=0, r=0, t=30, b=0), template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Price & Technicals")
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(x=df_price['date'], y=df_price['close'], name='BTC Price', line=dict(color='#2962FF')))
+    fig1.add_trace(go.Scatter(x=df_price['date'], y=df_price['MA200'], name='MA200', line=dict(color='#FF6D00')))
+    fig1.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), template="plotly_dark")
+    st.plotly_chart(fig1, use_container_width=True)
+
+    st.subheader("MVRV Ratio (On-Chain)")
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=df_mvrv['date'], y=df_mvrv['mvrv'], name='MVRV', line=dict(color='#00E676')))
+    fig2.update_layout(height=250, margin=dict(l=0, r=0, t=30, b=0), template="plotly_dark")
+    st.plotly_chart(fig2, use_container_width=True)
 
 with col2:
     st.subheader("Sentiment")
     st.metric(label="Fear & Greed Index", value=fng_val, delta=fng_class, delta_color="off")
-    
-    st.subheader("On-Chain Metrics")
-    st.info("To populate MVRV, SOPR, and NUPL, route your free Dune Analytics or BGeometrics API GET request here. The data mapping pattern is identical to the Binance fetcher.")
 
-st.subheader("Liquidation Heatmap")
-# 3. Coinglass Embedded Liquidity
-components.iframe("https://www.coinglass.com/pro/i/LiquidationHeatMap", height=800, scrolling=True)
+st.subheader("BTC Liquidation Heatmap")
+components.iframe("https://www.coinglass.com/pro/i/LiquidationHeatMap?symbol=BTC", height=800, scrolling=True)
