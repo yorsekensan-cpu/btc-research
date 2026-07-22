@@ -10,7 +10,13 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 def send_telegram_msg(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+    
+    print(f"Attempting to send message to Chat ID: {CHAT_ID}")
+    response = requests.post(url, json=payload)
+    
+    print(f"Telegram API Status: {response.status_code}")
+    if response.status_code != 200:
+        print(f"Telegram Error Details: {response.json()}")
 
 def check_signal(ticker, name):
     # Fetch 60 days of daily history to compute the 20-day MA
@@ -33,6 +39,8 @@ def check_signal(ticker, name):
     return None
 
 if __name__ == "__main__":
+    if __name__ == "__main__":
+    send_telegram_msg("🚀 *Diagnostic Test:* Pipeline network connection is active.")
     messages = []
     
     # Check BBCA.JK
