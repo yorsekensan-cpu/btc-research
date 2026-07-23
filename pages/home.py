@@ -1,77 +1,52 @@
 import streamlit as st
-import pandas as pd
-import yfinance as yf
-import requests
 
-st.title("Investment Command Center")
-st.caption("Executive overview and macro pulse across crypto and equities.")
+st.set_page_config(page_title="Market Dashboard", layout="wide")
 
-# --- FETCH LIVE DATA FOR SUMMARY SNAPSHOT ---
-@st.cache_data(ttl=3600)
-def get_snapshot_data():
-    # BTC Price
-    btc_price = 0.0
-    try:
-        url = "https://api.blockchain.info/charts/market-price"
-        res = requests.get(url, params={"timespan": "30days", "format": "json"}, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
-        btc_price = float(res["values"][-1]["y"])
-    except:
-        pass
+st.title("Market Intelligence Dashboard")
+st.caption("Quantitative regime monitoring.")
 
-    # BBCA Price & 200MA
-    bbca_price, bbca_ma200 = 0.0, 0.0
-    try:
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0"})
-        df = yf.download("BBCA.JK", period="1y", progress=False, session=session)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-        bbca_price = float(df["Close"].iloc[-1])
-        bbca_ma200 = float(df["Close"].rolling(200).mean().iloc[-1])
-    except:
-        pass
+# --- PORTFOLIO ALLOCATOR REMOVED ---
+# (The code block that used to be here is now deleted)
 
-    # Fear & Greed
-    fng_val, fng_class = 50, "Neutral"
-    try:
-        res = requests.get("https://api.alternative.me/fng/?limit=1", timeout=5).json()["data"][0]
-        fng_val, fng_class = int(res["value"]), res["value_classification"]
-    except:
-        pass
-
-    return btc_price, bbca_price, bbca_ma200, fng_val, fng_class
-
-btc_p, bbca_p, bbca_m200, fng, fng_c = get_snapshot_data()
-
-# --- LAYOUT: QUICK METRICS SNAPSHOT ---
-st.subheader("Market Pulse Snapshot")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric(label="Bitcoin Spot Price", value=f"${btc_p:,.0f}" if btc_p > 0 else "N/A")
-with col2:
-    st.metric(label="BBCA.JK Spot Price", value=f"Rp {bbca_p:,.0f}" if bbca_p > 0 else "N/A")
-with col3:
-    st.metric(label="Crypto Sentiment", value=f"{fng}/100", delta=fng_c, delta_color="off")
-
+# ==========================================
+# 🟢 CRYPTO ECOSYSTEM SECTION
+# ==========================================
 st.divider()
 
-# --- SYSTEM DIRECTORY ---
-st.subheader("Available Research Engines")
+# Adding Logo and Header side-by-side
+col1, col2 = st.columns([1, 20])
+with col1:
+    # Standard transparent BTC logo URL
+    st.image("https://cryptologos.cc/logos/bitcoin-btc-logo.png", width=40)
+with col2:
+    st.subheader("Crypto Assets")
 
-c1, c2, c3 = st.columns(3)
+# Your BTC Macro navigation link or content goes here
+st.page_link("pages/btc_macro.py", label="Bitcoin (BTC) Macro Regime", icon="📈")
 
-with c1:
-    st.markdown("### 📊 BTC Macro")
-    st.write("On-chain valuation, Puell Multiple, Pi Cycle Top, and technical momentum indicators.")
-    st.info("Select **BTC Macro Dashboard** from the sidebar.")
+# Adding Crypto Sentiment Logo and Header
+col3, col4 = st.columns([1, 20])
+with col3:
+    # Standard sentiment/gauge icon URL
+    st.image("https://cdn-icons-png.flaticon.com/512/3563/3563391.png", width=40)
+with col4:
+    st.subheader("Crypto Sentiment")
 
-with c2:
-    st.markdown("### 🏦 BBCA Matrix")
-    st.write("Quantitative equity screening, Moving Average regimes, RSI, and Bollinger bands for Bank Central Asia.")
-    st.info("Select **BBCA Equity Matrix** from the sidebar.")
+# Your Sentiment navigation link or content goes here
+st.write("Fear & Greed Index Dashboard")
 
-with c3:
-    st.markdown("### ⚖️ Allocator")
-    st.write("Mathematical sizing and rebalancing model to optimize capital allocation across your portfolio.")
-    st.info("Select **Portfolio Allocator** from the sidebar.")
+
+# ==========================================
+# 🔵 IDX EQUITIES SECTION
+# ==========================================
+st.divider()
+
+col5, col6 = st.columns([1, 20])
+with col5:
+    # Standard banking/IDX logo placeholder
+    st.image("https://cdn-icons-png.flaticon.com/512/2830/2830284.png", width=40)
+with col6:
+    st.subheader("IDX Equities")
+
+# Your BBCA Matrix navigation link or content goes here
+st.page_link("pages/bbca_matrix.py", label="Bank Central Asia (BBCA.JK) Equity Matrix", icon="🏦")
