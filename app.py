@@ -3,10 +3,10 @@ import streamlit as st
 st.set_page_config(page_title="Investment Dashboard", layout="wide")
 
 # Register your pages cleanly
-home_page = st.Page("pages/home.py", title="Command Center", icon="🏠", default=True)
-btc_macro_page = st.Page("pages/btc_macro.py", title="BTC Macro Dashboard", icon="📊")
-bbca_matrix_page = st.Page("pages/bbca_matrix.py", title="BBCA Equity Matrix", icon="🏦")
-adro_page = st.Page("pages/adro_matrix.py", title="ADRO Matrix", icon="⛏️")
+home_page = st.Page("pages/home.py", title="Command Center", icon="🏠")
+btc_page = st.Page("pages/btc_macro.py", title="BTC", icon="📊")
+bbca_page = st.Page("pages/bbca_matrix.py", title="BBCA", icon="🏦")
+adro_page = st.Page("pages/adro_matrix.py", title="ADRO", icon="⛏️")
 allocator_page = st.Page("pages/portofolio_allocator.py", title="Portfolio Allocator", icon="⚖️")
 
 # Pass only the modular pages into the router
