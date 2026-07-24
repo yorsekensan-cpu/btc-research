@@ -1,39 +1,47 @@
 import streamlit as st
+import yfinance as yf
+import pandas as pd
 
 st.set_page_config(page_title="Market Dashboard", layout="wide")
 
 st.title("Market Intelligence Dashboard")
 st.caption("Quantitative regime monitoring.")
 
-# --- PORTFOLIO ALLOCATOR REMOVED ---
-# (The code block that used to be here is now deleted)
+# --- LIVE PRICE FETCHING ENGINE ---
+@st.cache_data(ttl=60) # Caches the price for 60 seconds to prevent API rate limits
+def get_live_price(ticker):
+    try:
+        # Fetching a 1-day snapshot with 1-minute intervals
+        df = yf.download(ticker, period="1d", interval="1m", progress=False)
+        if not df.empty:
+            # Handle yfinance multi-index columns if present
+            if isinstance(df.columns, pd.MultiIndex):
+                return df['Close'].iloc[-1].values[0]
+            return df['Close'].iloc[-1]
+    except Exception:
+        pass
+    return None
+
+btc_price = get_live_price("BTC-USD")
+bbca_price = get_live_price("BBCA.JK")
 
 # ==========================================
 # 🟢 CRYPTO ECOSYSTEM SECTION
 # ==========================================
 st.divider()
 
-# Adding Logo and Header side-by-side
-col1, col2 = st.columns([1, 20])
+col1, col2, col3 = st.columns([1, 8, 3])
 with col1:
-    # Standard transparent BTC logo URL
     st.image("https://cryptologos.cc/logos/bitcoin-btc-logo.png", width=40)
 with col2:
     st.subheader("Crypto Assets")
-
-# Your BTC Macro navigation link or content goes here
-st.page_link("pages/btc_macro.py", label="Bitcoin (BTC) Macro Regime", icon="📈")
-
-# Adding Crypto Sentiment Logo and Header
-col3, col4 = st.columns([1, 20])
 with col3:
-    # Standard sentiment/gauge icon URL
-    st.image("https://cdn-icons-png.flaticon.com/512/3563/3563391.png", width=40)
-with col4:
-    st.subheader("Crypto Sentiment")
+    if btc_price:
+        st.metric(label="Live BTC/USD", value=f"${btc_price:,.2f}")
+    else:
+        st.metric(label="Live BTC/USD", value="Loading...")
 
-# Your Sentiment navigation link or content goes here
-st.write("Fear & Greed Index Dashboard")
+st.page_link("pages/btc_macro.py", label="Bitcoin (BTC) Macro Regime", icon="📈")
 
 
 # ==========================================
@@ -41,12 +49,15 @@ st.write("Fear & Greed Index Dashboard")
 # ==========================================
 st.divider()
 
-col5, col6 = st.columns([1, 20])
-with col5:
-    # Standard banking/IDX logo placeholder
+col4, col5, col6 = st.columns([1, 8, 3])
+with col4:
     st.image("https://cdn-icons-png.flaticon.com/512/2830/2830284.png", width=40)
-with col6:
+with col5:
     st.subheader("IDX Equities")
+with col6:
+    if bbca_price:
+        st.metric(label="Live BBCA", value=f"Rp{bbca_price:,.0f}")
+    else:
+        st.metric(label="Live BBCA", value="Loading...")
 
-# Your BBCA Matrix navigation link or content goes here
 st.page_link("pages/bbca_matrix.py", label="Bank Central Asia (BBCA.JK) Equity Matrix", icon="🏦")
