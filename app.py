@@ -10,5 +10,5 @@ adro_page = st.Page("pages/adro_matrix.py", title="ADRO", icon="⛏️")
 allocator_page = st.Page("pages/portofolio_allocator.py", title="Portfolio Allocator", icon="⚖️")
 
 # Pass only the modular pages into the router
-pg = st.navigation([home_page, btc_macro_page, bbca_matrix_page, adro_page, allocator_page])
+pg = st.navigation([home_page, btc_page, bbca_page, adro_page, allocator_page])
 pg.run()
