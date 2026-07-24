@@ -8,13 +8,11 @@ st.title("Market Intelligence Dashboard")
 st.caption("Quantitative regime monitoring.")
 
 # --- LIVE PRICE FETCHING ENGINE ---
-@st.cache_data(ttl=60) # Caches the price for 60 seconds to prevent API rate limits
+@st.cache_data(ttl=60)
 def get_live_price(ticker):
     try:
-        # Fetching a 1-day snapshot with 1-minute intervals
         df = yf.download(ticker, period="1d", interval="1m", progress=False)
         if not df.empty:
-            # Handle yfinance multi-index columns if present
             if isinstance(df.columns, pd.MultiIndex):
                 return df['Close'].iloc[-1].values[0]
             return df['Close'].iloc[-1]
@@ -24,6 +22,7 @@ def get_live_price(ticker):
 
 btc_price = get_live_price("BTC-USD")
 bbca_price = get_live_price("BBCA.JK")
+adro_price = get_live_price("ADRO.JK") # <-- Added ADRO live price
 
 # ==========================================
 # 🟢 CRYPTO ECOSYSTEM SECTION
@@ -55,9 +54,19 @@ with col4:
 with col5:
     st.subheader("IDX Equities")
 with col6:
-    if bbca_price:
-        st.metric(label="Live BBCA", value=f"Rp{bbca_price:,.0f}")
-    else:
-        st.metric(label="Live BBCA", value="Loading...")
+    # Display BBCA & ADRO metrics side by side
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        if bbca_price:
+            st.metric(label="BBCA", value=f"Rp{bbca_price:,.0f}")
+        else:
+            st.metric(label="BBCA", value="Loading...")
+    with m_col2:
+        if adro_price:
+            st.metric(label="ADRO", value=f"Rp{adro_price:,.0f}")
+        else:
+            st.metric(label="ADRO", value="Loading...")
 
+# Links to individual pages
 st.page_link("pages/bbca_matrix.py", label="Bank Central Asia (BBCA.JK) Equity Matrix", icon="🏦")
+st.page_link("pages/adro_matrix.py", label="Adaro Energy (ADRO.JK) Cyclical Matrix", icon="⛏️")
