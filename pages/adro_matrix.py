@@ -107,23 +107,34 @@ st.metric("Algorithmic Verdict", verdict, delta_color=color)
 st.divider()
 
 # --- 5. INTERACTIVE CHART ---
+# --- 5. INTERACTIVE CHART ---
 st.subheader("Price Action vs Institutional Averages")
 fig = go.Figure()
 
+# Using clean_df ensures no gaps break the moving average lines
 fig.add_trace(go.Candlestick(
-    x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+    x=clean_df.index, open=clean_df['Open'], high=clean_df['High'], low=clean_df['Low'], close=clean_df['Close'],
     name='ADRO Price'
 ))
 
-fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
-fig.add_trace(go.Scatter(x=df.index, y=df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
+fig.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
+fig.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
 
+# Upgraded layout with weekend hiding and increased height
 fig.update_layout(
     template="plotly_dark",
     xaxis_rangeslider_visible=False,
-    height=500,
-    margin=dict(l=0, r=0, t=30, b=0)
+    height=600,
+    margin=dict(l=10, r=10, t=30, b=10)
 )
+
+# This physically removes Saturday and Sunday from the X-Axis so the chart connects fully
+fig.update_xaxes(
+    rangebreaks=[
+        dict(bounds=["sat", "mon"]) 
+    ]
+)
+
 st.plotly_chart(fig, use_container_width=True)
 
 with st.expander("View Manager's Research Thesis"):
