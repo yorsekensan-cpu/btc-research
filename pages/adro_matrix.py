@@ -15,19 +15,17 @@ def fetch_adro_data():
         df = yf.download("ADRO.JK", period="2y", progress=False)
         fx_df = yf.download("IDR=X", period="1y", progress=False)
         
-        # Handle MultiIndex column structures cleanly
         if not df.empty and isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         if not fx_df.empty and isinstance(fx_df.columns, pd.MultiIndex):
             fx_df.columns = fx_df.columns.droplevel(1)
             
         return df, fx_df
-    except Exception as e:
+    except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
 df, fx_df = fetch_adro_data()
 
-# Validation Guard: Prevent crashing if yfinance returns empty data
 if df.empty or len(df) < 200 or fx_df.empty:
     st.warning("⚠️ Market data provider (yfinance) is temporarily busy or returning incomplete data. Please refresh in a few moments.")
     st.stop()
@@ -51,7 +49,6 @@ df["BB_pctB"] = (df["Close"] - df["Lower_BB"]) / (df["Upper_BB"] - df["Lower_BB"
 
 fx_df["MA50"] = fx_df["Close"].rolling(50).mean()
 
-# Drop NA rows safely
 clean_df = df.dropna()
 clean_fx = fx_df.dropna()
 
@@ -65,78 +62,130 @@ latest_fx = clean_fx.iloc[-1]
 # --- 3. SCORING REGIME LOGIC ---
 buy_count, sell_count = 0, 0
 
-trend_status = "BULLISH" if latest["MA50"] > latest["MA200"] else "BEARISH"
-if trend_status == "BULLISH": buy_count += 1 
-else: sell_count += 1
+# Trend
+if latest["MA50"] > latest["MA200"]:
+    trend_status, trend_signal = "BULLISH", "🟢 BUY"
+    buy_count += 1 
+else: 
+    trend_status, trend_signal = "BEARISH", "🔴 SELL"
+    sell_count += 1
 
-if latest["pct_vs_200ma"] <= -15: buy_count += 1
-elif latest["pct_vs_200ma"] >= 15: sell_count += 1
+# % vs 200 DMA
+if latest["pct_vs_200ma"] <= -15:
+    pct_status, pct_signal = "DEEP DISCOUNT", "🟢 BUY"
+    buy_count += 1
+elif latest["pct_vs_200ma"] >= 15:
+    pct_status, pct_signal = "OVEREXTENDED", "🔴 SELL"
+    sell_count += 1
+else:
+    pct_status, pct_signal = "NEUTRAL", "⚪ HOLD"
 
-if latest["RSI14"] <= 35: buy_count += 1
-elif latest["RSI14"] >= 70: sell_count += 1
+# RSI
+if latest["RSI14"] <= 35:
+    rsi_status, rsi_signal = "OVERSOLD", "🟢 BUY"
+    buy_count += 1
+elif latest["RSI14"] >= 70:
+    rsi_status, rsi_signal = "OVERBOUGHT", "🔴 SELL"
+    sell_count += 1
+else:
+    rsi_status, rsi_signal = "NEUTRAL", "⚪ HOLD"
 
-if latest["BB_pctB"] <= 0: buy_count += 1
-elif latest["BB_pctB"] >= 1: sell_count += 1
+# Bollinger %B
+if latest["BB_pctB"] <= 0:
+    bb_status, bb_signal = "BELOW LOWER BAND", "🟢 BUY"
+    buy_count += 1
+elif latest["BB_pctB"] >= 1:
+    bb_status, bb_signal = "ABOVE UPPER BAND", "🔴 SELL"
+    sell_count += 1
+else:
+    bb_status, bb_signal = "WITHIN BANDS", "⚪ HOLD"
 
-fx_status = "TAILWIND (Strong USD)" if latest_fx["Close"] > latest_fx["MA50"] else "HEADWIND (Weak USD)"
-if latest_fx["Close"] > latest_fx["MA50"]: buy_count += 1
-else: sell_count += 1
+# FX Macro Proxy
+if latest_fx["Close"] > latest_fx["MA50"]:
+    fx_status, fx_signal = "TAILWIND (Strong USD)", "🟢 BUY"
+    buy_count += 1
+else:
+    fx_status, fx_signal = "HEADWIND (Weak USD)", "🔴 SELL"
+    sell_count += 1
 
+# Regime Verdict Calculation
 if buy_count >= 3:
-    verdict = "CYCLICAL BUY ZONE 🟢"
+    verdict = "CYCLICAL BUY ZONE"
     color = "normal"
 elif sell_count >= 3:
-    verdict = "CYCLICAL SELL ZONE 🔴"
+    verdict = "CYCLICAL SELL ZONE"
     color = "inverse"
 else:
-    verdict = "NEUTRAL REGIME ⚪"
+    verdict = "NEUTRAL REGIME"
     color = "off"
 
-# --- 4. DASHBOARD UI ---
+# --- 4. DASHBOARD UI & RECOMMENDATION ---
 st.divider()
 
+# Live Metrics Row
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Live Price", f"Rp{latest['Close']:,.0f}")
 col2.metric("Trend (50 vs 200)", trend_status)
 col3.metric("% vs 200 DMA", f"{latest['pct_vs_200ma']:+.2f}%")
 col4.metric("RSI (14)", f"{latest['RSI14']:.1f}")
-col5.metric("USD/IDR Overlay", fx_status)
-
-st.metric("Algorithmic Verdict", verdict, delta_color=color)
+col5.metric("USD/IDR Overlay", "TAILWIND" if "TAILWIND" in fx_status else "HEADWIND")
 
 st.divider()
 
-# --- 5. INTERACTIVE CHART ---
-# --- 5. INTERACTIVE CHART ---
-st.subheader("Price Action vs Institutional Averages")
-fig = go.Figure()
+# The Explicit Recommendation Block
+st.subheader("Algorithmic Recommendation")
+if verdict == "CYCLICAL BUY ZONE":
+    st.success(f"**🟢 {verdict}:** ADRO is showing structural weakness in price but strong underlying macro/technical setup. Accumulate for cyclical rebound.")
+elif verdict == "CYCLICAL SELL ZONE":
+    st.error(f"**🔴 {verdict}:** ADRO is technically overextended. Consider trimming positions or taking profits as momentum exhausts.")
+else:
+    st.info(f"**⚪ {verdict}:** ADRO is chopping within normal structural bounds. Maintain current allocations and wait for a clear macro break.")
 
-# Using clean_df ensures no gaps break the moving average lines
-fig.add_trace(go.Candlestick(
-    x=clean_df.index, open=clean_df['Open'], high=clean_df['High'], low=clean_df['Low'], close=clean_df['Close'],
-    name='ADRO Price'
-))
+# The Detailed Indicator Matrix Table
+with st.expander("📊 View Detailed Indicator Breakdown", expanded=True):
+    matrix_data = {
+        "Indicator": ["Trend (50 vs 200 DMA)", "Deviation from 200 DMA", "RSI (14)", "Bollinger %B", "USD/IDR Macro Overlay"],
+        "Current Value": [f"50DMA: Rp{latest['MA50']:,.0f}", f"{latest['pct_vs_200ma']:+.2f}%", f"{latest['RSI14']:.1f}", f"{latest['BB_pctB']:.2f}", f"Rp{latest_fx['Close']:,.0f}"],
+        "Condition": [trend_status, pct_status, rsi_status, bb_status, fx_status],
+        "Signal": [trend_signal, pct_signal, rsi_signal, bb_signal, fx_signal]
+    }
+    st.table(pd.DataFrame(matrix_data))
 
-fig.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
-fig.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
+st.divider()
 
-# Upgraded layout with weekend hiding and increased height
-fig.update_layout(
-    template="plotly_dark",
-    xaxis_rangeslider_visible=False,
-    height=600,
-    margin=dict(l=10, r=10, t=30, b=10)
-)
+# --- 5. INTERACTIVE CHARTS ---
+st.subheader("Price Action & Moving Averages")
+fig_price = go.Figure()
+fig_price.add_trace(go.Candlestick(x=clean_df.index, open=clean_df['Open'], high=clean_df['High'], low=clean_df['Low'], close=clean_df['Close'], name='ADRO Price'))
+fig_price.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
+fig_price.add_trace(go.Scatter(x=clean_df.index, y=clean_df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
+fig_price.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=500, margin=dict(l=10, r=10, t=30, b=10))
+fig_price.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+st.plotly_chart(fig_price, use_container_width=True)
 
-# This physically removes Saturday and Sunday from the X-Axis so the chart connects fully
-fig.update_xaxes(
-    rangebreaks=[
-        dict(bounds=["sat", "mon"]) 
-    ]
-)
+col_chart1, col_chart2 = st.columns(2)
 
-st.plotly_chart(fig, use_container_width=True)
+with col_chart1:
+    st.subheader("Relative Strength Index (RSI)")
+    fig_rsi = go.Figure()
+    fig_rsi.add_trace(go.Scatter(x=clean_df.index, y=clean_df['RSI14'], line=dict(color='purple', width=2), name='RSI (14)'))
+    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)")
+    fig_rsi.add_hline(y=35, line_dash="dash", line_color="green", annotation_text="Oversold (35)")
+    fig_rsi.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_rsi.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    st.plotly_chart(fig_rsi, use_container_width=True)
 
+with col_chart2:
+    st.subheader("Bollinger Bands")
+    fig_bb = go.Figure()
+    fig_bb.add_trace(go.Scatter(x=clean_df.index, y=clean_df['Upper_BB'], line=dict(color='gray', dash='dot'), name='Upper Band'))
+    fig_bb.add_trace(go.Scatter(x=clean_df.index, y=clean_df['Lower_BB'], line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128, 128, 128, 0.2)', name='Lower Band'))
+    fig_bb.add_trace(go.Scatter(x=clean_df.index, y=clean_df['Close'], line=dict(color='white', width=1.5), name='Price'))
+    fig_bb.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_bb.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    st.plotly_chart(fig_bb, use_container_width=True)
+
+# --- 6. MACRO RESEARCH EXPANDER ---
 with st.expander("View Manager's Research Thesis"):
     st.markdown("""
     **The Cyclical Nature of ADRO:**
