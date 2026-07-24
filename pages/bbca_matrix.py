@@ -1,170 +1,196 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import plotly.graph_objects as go
-import requests
 
-st.title("Bank Central Asia (BBCA.JK) Equity Matrix")
-st.caption("Quantitative regime matrix tailored specifically for BBCA.JK.")
+st.set_page_config(page_title="BBCA Matrix", layout="wide")
 
-TICKER = "BBCA.JK"
+st.title("🏦 Bank Central Asia (BBCA.JK) Equity Matrix")
+st.caption("Quantitative Regime and Momentum Tracking")
 
-@st.cache_data(ttl=3600)
-def get_bbca_data():
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-    })
-    
-    # Expanded to 10 years to support the multi-year timeframe selector
-    df = yf.download(TICKER, period="10y", progress=False, session=session)
-    
-    if df.empty:
+# --- 1. SAFE DATA FETCHING ---
+@st.cache_data(ttl=300)
+def fetch_bbca_data():
+    try:
+        # Fetch 2 years to ensure the 200 DMA calculates correctly
+        df = yf.download("BBCA.JK", period="2y", progress=False)
+        
+        if not df.empty and isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+            
+        return df
+    except Exception:
         return pd.DataFrame()
-        
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
-        
-    df.reset_index(inplace=True)
-    df.rename(columns={"Date": "date", "Close": "close", "Volume": "volume"}, inplace=True)
-    
-    df["MA50"] = df["close"].rolling(50).mean()
-    df["MA200"] = df["close"].rolling(200).mean()
-    df["pct_vs_200ma"] = (df["close"] / df["MA200"] - 1) * 100
-    
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = (-delta.clip(upper=0)).rolling(14).mean()
-    rs = gain / loss
-    df["RSI14"] = 100 - (100 / (1 + rs))
-    
-    ma20 = df["close"].rolling(20).mean()
-    std20 = df["close"].rolling(20).std()
-    upper_bb = ma20 + (2 * std20)
-    lower_bb = ma20 - (2 * std20)
-    df["BB_pctB"] = (df["close"] - lower_bb) / (upper_bb - lower_bb)
-    
-    return df.dropna().reset_index(drop=True)
 
-df = get_bbca_data()
+df = fetch_bbca_data()
 
-if df.empty:
-    st.error("Failed to fetch BBCA.JK market data. Please check back shortly.")
+if df.empty or len(df) < 200:
+    st.warning("⚠️ Market data provider (yfinance) is temporarily busy or returning incomplete data. Please refresh in a few moments.")
+    st.stop()
+
+# --- 2. CALCULATE INDICATORS ---
+df["MA50"] = df["Close"].rolling(50).mean()
+df["MA200"] = df["Close"].rolling(200).mean()
+df["pct_vs_200ma"] = (df["Close"] / df["MA200"] - 1) * 100
+
+delta = df["Close"].diff()
+gain = delta.clip(lower=0).rolling(14).mean()
+loss = (-delta.clip(upper=0)).rolling(14).mean()
+rs = gain / loss
+df["RSI14"] = 100 - (100 / (1 + rs))
+
+ma20 = df["Close"].rolling(20).mean()
+std20 = df["Close"].rolling(20).std()
+df["Upper_BB"] = ma20 + (2 * std20)
+df["Lower_BB"] = ma20 - (2 * std20)
+df["BB_pctB"] = (df["Close"] - df["Lower_BB"]) / (df["Upper_BB"] - df["Lower_BB"])
+
+clean_df = df.dropna()
+
+if clean_df.empty:
+    st.warning("⚠️ Calculating technicals... Waiting for complete data history.")
+    st.stop()
+
+latest = clean_df.iloc[-1]
+
+# --- 3. SCORING REGIME LOGIC ---
+buy_count, sell_count = 0, 0
+
+if latest["MA50"] > latest["MA200"]:
+    trend_status, trend_signal = "BULLISH", "🟢 BUY"
+    buy_count += 1 
+else: 
+    trend_status, trend_signal = "BEARISH", "🔴 SELL"
+    sell_count += 1
+
+# Standard compounding bank threshold (tighter than cyclical assets)
+if latest["pct_vs_200ma"] <= -5:
+    pct_status, pct_signal = "DEEP DISCOUNT", "🟢 BUY"
+    buy_count += 1
+elif latest["pct_vs_200ma"] >= 10:
+    pct_status, pct_signal = "OVEREXTENDED", "🔴 SELL"
+    sell_count += 1
 else:
-    latest = df.iloc[-1]
-    
-    descriptions = {
-        "Trend (50 vs 200)": (
-            "The relationship between the 50-day and 200-day Moving Averages. When the 50 DMA is above the 200 DMA "
-            "(Golden Cross), the macro trend is strictly bullish. When below (Death Cross), the trend is bearish. "
-            "For compounding blue-chips like BBCA, this is your primary structural filter."
-        ),
-        "% vs 200 DMA": (
-            "Measures how far the current price has stretched from its 200-day moving average. "
-            "Because BBCA is a low-volatility banking stock, dropping 5% or more below the 200 DMA historically "
-            "represents a deep value accumulation zone. Pushing 10%+ above it suggests the stock is temporarily overbought."
-        ),
-        "RSI (14)": (
-            "A standard momentum oscillator. For stable equities, an RSI above 70 indicates short-term exhaustion "
-            "(take profit / hold zone). An RSI below 35 indicates an oversold dip, offering a tactical entry point."
-        ),
-        "Bollinger %B": (
-            "Shows where the price sits relative to its 20-day volatility bands. A value above 1 means the price "
-            "has pierced the upper band (mean-reversion risk). A value below 0 means it pierced the lower band "
-            "(statistically stretched downward, high probability of a bounce)."
-        )
+    pct_status, pct_signal = "NEUTRAL", "⚪ HOLD"
+
+if latest["RSI14"] <= 35:
+    rsi_status, rsi_signal = "OVERSOLD", "🟢 BUY"
+    buy_count += 1
+elif latest["RSI14"] >= 70:
+    rsi_status, rsi_signal = "OVERBOUGHT", "🔴 SELL"
+    sell_count += 1
+else:
+    rsi_status, rsi_signal = "NEUTRAL", "⚪ HOLD"
+
+if latest["BB_pctB"] <= 0:
+    bb_status, bb_signal = "BELOW LOWER BAND", "🟢 BUY"
+    buy_count += 1
+elif latest["BB_pctB"] >= 1:
+    bb_status, bb_signal = "ABOVE UPPER BAND", "🔴 SELL"
+    sell_count += 1
+else:
+    bb_status, bb_signal = "WITHIN BANDS", "⚪ HOLD"
+
+# Requires 3 out of 4 indicators to trigger a strong regime shift
+if buy_count >= 3:
+    verdict = "ACCUMULATION ZONE"
+    color = "normal"
+elif sell_count >= 3:
+    verdict = "DISTRIBUTION ZONE"
+    color = "inverse"
+else:
+    verdict = "NEUTRAL REGIME"
+    color = "off"
+
+# --- 4. DASHBOARD UI & RECOMMENDATION ---
+st.divider()
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Live Price", f"Rp{latest['Close']:,.0f}")
+col2.metric("Trend (50 vs 200)", trend_status)
+col3.metric("% vs 200 DMA", f"{latest['pct_vs_200ma']:+.2f}%")
+col4.metric("RSI (14)", f"{latest['RSI14']:.1f}")
+
+st.divider()
+
+st.subheader("Algorithmic Recommendation")
+if verdict == "ACCUMULATION ZONE":
+    st.success(f"**🟢 {verdict}:** BBCA is exhibiting rare structural weakness. This presents a high-probability entry point for long-term compounding.")
+elif verdict == "DISTRIBUTION ZONE":
+    st.error(f"**🔴 {verdict}:** BBCA is technically overextended compared to its historical mean. Consider holding off on new capital deployment until a pullback occurs.")
+else:
+    st.info(f"**⚪ {verdict}:** BBCA is compounding steadily within normal structural bounds. Maintain current holdings and collect dividends.")
+
+with st.expander("📊 View Detailed Indicator Breakdown", expanded=False):
+    matrix_data = {
+        "Indicator": ["Trend (50 vs 200 DMA)", "Deviation from 200 DMA", "RSI (14)", "Bollinger %B"],
+        "Current Value": [f"50DMA: Rp{latest['MA50']:,.0f}", f"{latest['pct_vs_200ma']:+.2f}%", f"{latest['RSI14']:.1f}", f"{latest['BB_pctB']:.2f}"],
+        "Condition": [trend_status, pct_status, rsi_status, bb_status],
+        "Signal": [trend_signal, pct_signal, rsi_signal, bb_signal]
     }
-    
-    def score_metric(val, buy_thresh, sell_thresh, invert=False):
-        if pd.isna(val): return "N/A", "gray"
-        if not invert:
-            if val <= buy_thresh: return "BUY ZONE", "green"
-            if val >= sell_thresh: return "SELL ZONE", "red"
-            return "NEUTRAL", "gray"
-        else:
-            if val <= buy_thresh: return "SELL ZONE", "red"
-            if val >= sell_thresh: return "BUY ZONE", "green"
-            return "NEUTRAL", "gray"
+    st.table(pd.DataFrame(matrix_data))
 
-    signals = {
-        "Trend (50 vs 200)": ("BULLISH", "green") if latest["MA50"] > latest["MA200"] else ("BEARISH", "red"),
-        "% vs 200 DMA": score_metric(latest["pct_vs_200ma"], -5, 10), 
-        "RSI (14)": score_metric(latest["RSI14"], 35, 70),
-        "Bollinger %B": score_metric(latest["BB_pctB"], 0, 1)
-    }
+st.divider()
 
-    st.subheader("Current Read")
-    cols = st.columns(len(signals))
-    metric_values = {
-        "Trend (50 vs 200)": f"50MA: Rp{latest['MA50']:,.0f} | 200MA: Rp{latest['MA200']:,.0f}",
-        "% vs 200 DMA": f"{latest['pct_vs_200ma']:+.2f}%",
-        "RSI (14)": f"{latest['RSI14']:.1f}",
-        "Bollinger %B": f"{latest['BB_pctB']:.2f}"
-    }
-    
-    for c, (name, (label, color)) in zip(cols, signals.items()):
-        with c:
-            st.markdown(f"**{name}**")
-            st.markdown(f"<span style='color:{color}'>{label}</span>", unsafe_allow_html=True)
-            st.caption(metric_values[name])
+# --- 5. TIMEFRAME SELECTOR & INTERACTIVE CHARTS ---
+st.subheader("Price Action & Moving Averages")
 
-    st.divider()
+timeframe = st.radio(
+    "Select Chart Timeframe:",
+    ["3 Months", "6 Months", "1 Year", "2 Years"],
+    horizontal=True,
+    index=3
+)
 
-    # --- TIMEFRAME SELECTOR ---
-    timeframe = st.radio("Chart timeframe", options=["1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "All"], index=3, horizontal=True)
-    _days_map = {"1M": 30, "3M": 90, "6M": 182, "1Y": 365, "2Y": 730, "3Y": 1095, "5Y": 1825, "All": None}
-    _cutoff_days = _days_map[timeframe]
-    
-    if _cutoff_days is None:
-        view_df = df
-    else:
-        cutoff_date = df["date"].max() - pd.Timedelta(days=_cutoff_days)
-        view_df = df[df["date"] >= cutoff_date]
+end_date = clean_df.index.max()
+if timeframe == "3 Months":
+    start_date = end_date - pd.DateOffset(months=3)
+elif timeframe == "6 Months":
+    start_date = end_date - pd.DateOffset(months=6)
+elif timeframe == "1 Year":
+    start_date = end_date - pd.DateOffset(years=1)
+else:
+    start_date = clean_df.index.min()
 
-    st.divider()
+plot_df = clean_df[clean_df.index >= start_date]
 
-    # --- CHARTS ---
-    st.subheader("Price & Moving Averages")
-    fig1 = go.Figure()
-    fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["close"], name="BBCA Close", line=dict(color="#2962FF")))
-    fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["MA50"], name="50 DMA", line=dict(color="#00E676", dash="dot")))
-    fig1.add_trace(go.Scatter(x=view_df["date"], y=view_df["MA200"], name="200 DMA", line=dict(color="#FF6D00")))
-    fig1.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
-    st.plotly_chart(fig1, use_container_width=True)
-    with st.expander("How to read Trend (50 vs 200)"):
-        st.write(descriptions["Trend (50 vs 200)"])
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("RSI (14)")
-        fig_rsi = go.Figure()
-        fig_rsi.add_trace(go.Scatter(x=view_df["date"], y=view_df["RSI14"], name="RSI", line=dict(color="#FF6D00")))
-        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red")
-        fig_rsi.add_hline(y=35, line_dash="dash", line_color="green")
-        fig_rsi.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
-        st.plotly_chart(fig_rsi, use_container_width=True)
-        with st.expander("How to read RSI (14)"):
-            st.write(descriptions["RSI (14)"])
+# Main Price Chart
+fig_price = go.Figure()
+fig_price.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='BBCA Price'))
+fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
+fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
+fig_price.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=500, margin=dict(l=10, r=10, t=30, b=10))
+fig_price.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+st.plotly_chart(fig_price, use_container_width=True)
 
-    with c2:
-        st.subheader("% vs 200 DMA")
-        fig_dist = go.Figure()
-        fig_dist.add_trace(go.Scatter(x=view_df["date"], y=view_df["pct_vs_200ma"], name="% dist", line=dict(color="#00E676")))
-        fig_dist.add_hline(y=10, line_dash="dash", line_color="red")
-        fig_dist.add_hline(y=-5, line_dash="dash", line_color="green")
-        fig_dist.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
-        st.plotly_chart(fig_dist, use_container_width=True)
-        with st.expander("How to read % vs 200 DMA"):
-            st.write(descriptions["% vs 200 DMA"])
+# Sub-Charts
+col_chart1, col_chart2 = st.columns(2)
 
-    st.divider()
+with col_chart1:
+    st.subheader("Relative Strength Index (RSI)")
+    fig_rsi = go.Figure()
+    fig_rsi.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI14'], line=dict(color='purple', width=2), name='RSI (14)'))
+    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)")
+    fig_rsi.add_hline(y=35, line_dash="dash", line_color="green", annotation_text="Oversold (35)")
+    fig_rsi.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_rsi.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    st.plotly_chart(fig_rsi, use_container_width=True)
 
-    st.subheader("Bollinger %B (Volatility)")
+with col_chart2:
+    st.subheader("Bollinger Bands")
     fig_bb = go.Figure()
-    fig_bb.add_trace(go.Scatter(x=view_df["date"], y=view_df["BB_pctB"], name="%B", line=dict(color="#AA00FF")))
-    fig_bb.add_hline(y=1, line_dash="dash", line_color="red")
-    fig_bb.add_hline(y=0, line_dash="dash", line_color="green")
-    fig_bb.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=0), template="plotly_dark")
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Upper_BB'], line=dict(color='gray', dash='dot'), name='Upper Band'))
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Lower_BB'], line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128, 128, 128, 0.2)', name='Lower Band'))
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], line=dict(color='white', width=1.5), name='Price'))
+    fig_bb.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_bb.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     st.plotly_chart(fig_bb, use_container_width=True)
-    with st.expander("How to read Bollinger %B"):
-        st.write(descriptions["Bollinger %B"])
+
+# --- 6. MACRO RESEARCH EXPANDER ---
+with st.expander("View Manager's Research Thesis"):
+    st.markdown("""
+    **The Compounding Nature of BBCA:**
+    Unlike highly cyclical assets, Bank Central Asia (BBCA) is evaluated as a structural compounder driven by credit growth and net interest margins (NIM). 
+    *   **The 200 DMA Rule:** BBCA rarely breaks below its 200-day moving average during normal economic conditions. A deviation of -5% or more signals a rare systemic discount and a high-conviction accumulation zone.
+    *   **Low Volatility Profile:** Momentum metrics (like RSI and Bollinger Bands) act as short-term timing tools for capital deployment, rather than structural exit signals.
+    """)
