@@ -148,15 +148,13 @@ st.divider()
 # --- 5. TIMEFRAME SELECTOR & INTERACTIVE CHARTS ---
 st.subheader("Price Action & Moving Averages")
 
-# The Timeframe Toggle
 timeframe = st.radio(
     "Select Chart Timeframe:",
     ["3 Months", "6 Months", "1 Year", "2 Years"],
     horizontal=True,
-    index=3  # Defaults to 2 Years
+    index=3
 )
 
-# Filter the dataframe based on the selection
 end_date = clean_df.index.max()
 if timeframe == "3 Months":
     start_date = end_date - pd.DateOffset(months=3)
@@ -169,38 +167,49 @@ else:
 
 plot_df = clean_df[clean_df.index >= start_date]
 
-# Main Price Chart
+# 1. Main Candlestick Chart (Fixed 200 DMA Color to Bright Cyan)
 fig_price = go.Figure()
-fig_price.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='ADRO Price'))
+fig_price.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='Price'))
 fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA50'], line=dict(color='orange', width=1.5), name='50-Day MA'))
-fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA200'], line=dict(color='blue', width=2), name='200-Day MA'))
-fig_price.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=500, margin=dict(l=10, r=10, t=30, b=10))
+fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA200'], line=dict(color='#00FFFF', width=2), name='200-Day MA (Cyan)')) # <-- Brightened
+fig_price.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=450, margin=dict(l=10, r=10, t=30, b=10))
 fig_price.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
 st.plotly_chart(fig_price, use_container_width=True)
 
-# Sub-Charts
-col_chart1, col_chart2 = st.columns(2)
+# 2. Sub-Charts Grid (3 Columns now)
+col_chart1, col_chart2, col_chart3 = st.columns(3)
 
 with col_chart1:
+    st.subheader("200 DMA Deviation (%)")
+    fig_dma = go.Figure()
+    fig_dma.add_trace(go.Scatter(x=plot_df.index, y=plot_df['pct_vs_200ma'], line=dict(color='#00FFFF', width=1.5), name='% vs 200DMA'))
+    fig_dma.add_hline(y=15, line_dash="dash", line_color="red", annotation_text="Overextended (+15%)")
+    fig_dma.add_hline(y=-15, line_dash="dash", line_color="green", annotation_text="Discount (-15%)")
+    fig_dma.add_hline(y=0, line_dash="dot", line_color="gray")
+    fig_dma.update_layout(template="plotly_dark", height=280, margin=dict(l=10, r=10, t=30, b=10))
+    fig_dma.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    st.plotly_chart(fig_dma, use_container_width=True)
+
+with col_chart2:
     st.subheader("Relative Strength Index (RSI)")
     fig_rsi = go.Figure()
-    fig_rsi.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI14'], line=dict(color='purple', width=2), name='RSI (14)'))
-    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)")
-    fig_rsi.add_hline(y=35, line_dash="dash", line_color="green", annotation_text="Oversold (35)")
-    fig_rsi.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_rsi.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI14'], line=dict(color='purple', width=1.5), name='RSI (14)'))
+    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="70")
+    fig_rsi.add_hline(y=35, line_dash="dash", line_color="green", annotation_text="35")
+    fig_rsi.update_layout(template="plotly_dark", height=280, margin=dict(l=10, r=10, t=30, b=10))
     fig_rsi.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     st.plotly_chart(fig_rsi, use_container_width=True)
 
-with col_chart2:
+with col_chart3:
     st.subheader("Bollinger Bands")
     fig_bb = go.Figure()
-    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Upper_BB'], line=dict(color='gray', dash='dot'), name='Upper Band'))
-    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Lower_BB'], line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128, 128, 128, 0.2)', name='Lower Band'))
-    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], line=dict(color='white', width=1.5), name='Price'))
-    fig_bb.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=30, b=10))
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Upper_BB'], line=dict(color='gray', dash='dot'), name='Upper'))
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Lower_BB'], line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128, 128, 128, 0.15)', name='Lower'))
+    fig_bb.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], line=dict(color='white', width=1.2), name='Price'))
+    fig_bb.update_layout(template="plotly_dark", height=280, margin=dict(l=10, r=10, t=30, b=10))
     fig_bb.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     st.plotly_chart(fig_bb, use_container_width=True)
-
+    
 # --- 6. MACRO RESEARCH EXPANDER ---
 with st.expander("View Manager's Research Thesis"):
     st.markdown("""
