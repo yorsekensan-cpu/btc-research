@@ -37,11 +37,11 @@ st.subheader("1. Input Current Holdings & Capital")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    cash_fiat = st.number_input("Idle Cash (IDR)", min_value=0.0, value=50000000.0, step=1000000.0, format="%.0f")
+    cash_fiat = st.number_input("Idle Cash (IDR)", min_value=0.0, value=0.0, step=1000000.0, format="%.0f")
 with col2:
-    btc_units = st.number_input("BTC Holdings (Units)", min_value=0.0, value=0.25, step=0.01, format="%.4f")
+    btc_units = st.number_input("BTC Holdings (Units)", min_value=0.0, value=0, step=0.01, format="%.4f")
 with col3:
-    bbca_shares = st.number_input("BBCA Holdings (Shares)", min_value=0, value=1500, step=100)
+    bbca_shares = st.number_input("BBCA Holdings (Shares)", min_value=0, value=0, step=100)
 
 # --- 3. SCENARIO PRESETS ---
 st.subheader("2. Select Deployment Scenario Preset")
