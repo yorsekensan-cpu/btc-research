@@ -1,6 +1,11 @@
 # ==========================================
 # 🔵 IDX EQUITIES SECTION
 # ==========================================
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+
+# The rest of your code follows...
 st.divider()
 
 col4, col5, col6 = st.columns([1, 8, 3])
