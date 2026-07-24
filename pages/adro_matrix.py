@@ -13,7 +13,7 @@ st.caption("Commodity, Currency, and Trend Regime Monitoring")
 def fetch_adro_data():
     try:
         # We always fetch 2 years so the 200 DMA calculates correctly
-        df = yf.download("ADRO.JK", period="2y", progress=False)
+        df = yf.download("ADRO.JK", period="max", progress=False)
         fx_df = yf.download("IDR=X", period="1y", progress=False)
         
         if not df.empty and isinstance(df.columns, pd.MultiIndex):
@@ -150,9 +150,9 @@ st.subheader("Price Action & Moving Averages")
 
 timeframe = st.radio(
     "Select Chart Timeframe:",
-    ["3 Months", "6 Months", "1 Year", "2 Years"],
+    ["3 Months", "6 Months", "1 Year", "2 Years", "5 Years", "Max"],
     horizontal=True,
-    index=3
+    index=5 # Defaults to Max
 )
 
 end_date = clean_df.index.max()
@@ -162,9 +162,13 @@ elif timeframe == "6 Months":
     start_date = end_date - pd.DateOffset(months=6)
 elif timeframe == "1 Year":
     start_date = end_date - pd.DateOffset(years=1)
+elif timeframe == "2 Years":
+    start_date = end_date - pd.DateOffset(years=2)
+elif timeframe == "5 Years":
+    start_date = end_date - pd.DateOffset(years=5)
 else:
     start_date = clean_df.index.min()
-
+    
 plot_df = clean_df[clean_df.index >= start_date]
 
 # 1. Main Candlestick Chart (Fixed 200 DMA Color to Bright Cyan)
