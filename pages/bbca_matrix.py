@@ -13,7 +13,7 @@ st.caption("Quantitative Regime and Momentum Tracking")
 def fetch_bbca_data():
     try:
         # Fetch 2 years to ensure the 200 DMA calculates correctly
-        df = yf.download("BBCA.JK", period="2y", progress=False)
+        df = yf.download("BBCA.JK", period="max", progress=False)
         
         if not df.empty and isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
@@ -137,9 +137,9 @@ st.subheader("Price Action & Moving Averages")
 
 timeframe = st.radio(
     "Select Chart Timeframe:",
-    ["3 Months", "6 Months", "1 Year", "2 Years"],
+    ["3 Months", "6 Months", "1 Year", "2 Years", "5 Years", "Max"],
     horizontal=True,
-    index=3
+    index=5 # Defaults to Max
 )
 
 end_date = clean_df.index.max()
@@ -149,9 +149,13 @@ elif timeframe == "6 Months":
     start_date = end_date - pd.DateOffset(months=6)
 elif timeframe == "1 Year":
     start_date = end_date - pd.DateOffset(years=1)
+elif timeframe == "2 Years":
+    start_date = end_date - pd.DateOffset(years=2)
+elif timeframe == "5 Years":
+    start_date = end_date - pd.DateOffset(years=5)
 else:
     start_date = clean_df.index.min()
-
+    
 plot_df = clean_df[clean_df.index >= start_date]
 
 # Main Price Chart (Fixed 200 DMA Color to Bright Cyan)
