@@ -39,7 +39,7 @@ col1, col2, col3 = st.columns(3)
 with col1:
     cash_fiat = st.number_input("Idle Cash (IDR)", min_value=0.0, value=0.0, step=1000000.0, format="%.0f")
 with col2:
-    btc_units = st.number_input("BTC Holdings (Units)", min_value=0.0, value=0, step=0.01, format="%.4f")
+    btc_units = st.number_input("BTC Holdings (Units)", min_value=0.0, value=0.0, step=0.01, format="%.4f")
 with col3:
     bbca_shares = st.number_input("BBCA Holdings (Shares)", min_value=0, value=0, step=100)
 
